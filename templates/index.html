@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrakZone SMTP Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- DataTables -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        .card { background-color: #1e293b; border: 1px solid #334155; transition: all 0.3s ease; }
+        .card:hover { border-color: #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.1); }
+        .text-neon { color: #38bdf8; }
+        .text-danger { color: #f43f5e; }
+        .text-success { color: #22c55e; }
+        .text-warning { color: #eab308; }
+        
+        /* DataTables Dark Theme Overrides */
+        table.dataTable { background-color: #1e293b; color: #e2e8f0; border-collapse: collapse; }
+        table.dataTable thead th { background-color: #334155; color: #f8fafc; border-bottom: 2px solid #38bdf8 !important; }
+        table.dataTable tbody tr:hover { background-color: #334155; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button { color: #e2e8f0 !important; }
+        .dataTables_wrapper .dataTables_filter input { 
+            background-color: #334155; color: #f8fafc; border: 1px solid #475569; 
+            border-radius: 4px; padding: 4px 8px;
+        }
+        .dataTables_wrapper .dataTables_length select {
+            background-color: #334155; color: #f8fafc; border: 1px solid #475569;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+
+    <!-- Header -->
+    <header class="mb-8 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-neon">⚡ DrakZone SMTP Dashboard</h1>
+            <p id="folder-info" class="text-gray-400 text-sm mt-1">Loading latest scan data...</p>
+        </div>
+        <button onclick="loadData()" class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg font-medium transition">
+            🔄 Refresh Data
+        </button>
+    </header>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div class="card p-6 rounded-lg shadow-lg">
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wide">Total Domains</h3>
+            <p id="stat-total" class="text-3xl font-bold text-neon mt-2">0</p>
+        </div>
+        <div class="card p-6 rounded-lg shadow-lg">
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wide">SMTP Servers</h3>
+            <p id="stat-smtp" class="text-3xl font-bold text-success mt-2">0</p>
+        </div>
+        <div class="card p-6 rounded-lg shadow-lg">
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wide">Open Relays</h3>
+            <p id="stat-relay" class="text-3xl font-bold text-danger mt-2">0</p>
+        </div>
+        <div class="card p-6 rounded-lg shadow-lg">
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wide">High Value (30+)</h3>
+            <p id="stat-hv" class="text-3xl font-bold text-warning mt-2">0</p>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div class="card p-6 rounded-lg">
+            <h3 class="text-lg font-semibold mb-4">Scan Status Distribution</h3>
+            <canvas id="statusChart" height="200"></canvas>
+        </div>
+        <div class="card p-6 rounded-lg">
+            <h3 class="text-lg font-semibold mb-4">Top SMTP Software Identified</h3>
+            <canvas id="softwareChart" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="card p-6 rounded-lg">
+        <h3 class="text-lg font-semibold mb-4">Detailed Scan Results</h3>
+        <div class="overflow-x-auto">
+            <table id="resultsTable" class="w-full text-sm text-left">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3">Domain</th>
+                        <th class="px-4 py-3">Score</th>
+                        <th class="px-4 py-3">IP Address</th>
+                        <th class="px-4 py-3">Open Ports</th>
+                        <th class="px-4 py-3">Software</th>
+                        <th class="px-4 py-3">Open Relay</th>
+                        <th class="px-4 py-3">STARTTLS</th>
+                        <th class="px-4 py-3">Users</th>
+                        <th class="px-4 py-3">Country</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let statusChartInstance = null;
+        let softwareChartInstance = null;
+        let tableInstance = null;
+
+        function loadData() {
+            document.getElementById('folder-info').innerText = "Fetching data...";
+            
+            fetch('/api/data')
+                .then(res => res.json())
+                .then(data => {
+                    if(data.error) {
+                        document.getElementById('folder-info').innerText = "❌ " + data.error;
+                        return;
+                    }
+                    
+                    document.getElementById('folder-info').innerText = `📁 Active Folder: ${data.summary.folder}`;
+                    renderSummary(data.summary);
+                    renderCharts(data.results);
+                    renderTable(data.results);
+                })
+                .catch(err => {
+                    document.getElementById('folder-info').innerText = "❌ Failed to connect to backend.";
+                    console.error(err);
+                });
+        }
+
+        function renderSummary(summary) {
+            document.getElementById('stat-total').innerText = summary.total;
+            document.getElementById('stat-smtp').innerText = summary.smtp_found;
+            document.getElementById('stat-relay').innerText = summary.open_relays;
+            document.getElementById('stat-hv').innerText = summary.high_value;
+        }
+
+        function renderCharts(results) {
+            // 1. Status Pie Chart
+            const statuses = { 'ok': 0, 'no-smtp': 0, 'no-dns': 0, 'error': 0, 'pending': 0 };
+            results.forEach(r => {
+                const s = r.status || 'error';
+                if(statuses.hasOwnProperty(s)) statuses[s]++;
+            });
+
+            if(statusChartInstance) statusChartInstance.destroy();
+            statusChartInstance = new Chart(document.getElementById('statusChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['SMTP Found', 'No SMTP', 'No DNS', 'Error'],
+                    datasets: [{
+                        data: [statuses['ok'], statuses['no-smtp'], statuses['no-dns'], statuses['error']],
+                        backgroundColor: ['#22c55e', '#eab308', '#f43f5e', '#64748b'],
+                        borderColor: '#1e293b',
+                        borderWidth: 3
+                    }]
+                },
+                options: { 
+                    plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 14 } } } },
+                    cutout: '60%'
+                }
+            });
+
+            // 2. Software Bar Chart
+            const softwareCount = {};
+            results.forEach(r => {
+                const sw = r.smtp_software && r.smtp_software !== 'Unknown' ? r.smtp_software : 'Unknown/Other';
+                softwareCount[sw] = (softwareCount[sw] || 0) + 1;
+            });
+            
+            const sortedSw = Object.entries(softwareCount).sort((a,b) => b[1] - a[1]).slice(0, 8);
+            
+            if(softwareChartInstance) softwareChartInstance.destroy();
+            softwareChartInstance = new Chart(document.getElementById('softwareChart'), {
+                type: 'bar',
+                data: {
+                    labels: sortedSw.map(s => s[0]),
+                    datasets: [{
+                        label: 'Instances',
+                        data: sortedSw.map(s => s[1]),
+                        backgroundColor: '#38bdf8',
+                        borderColor: '#0ea5e9',
+                        borderWidth: 1,
+                        borderRadius: 5
+                    }]
+                },
+                options: { 
+                    plugins: { legend: { display: false } },
+                    scales: { 
+                        y: { ticks: { color: '#e2e8f0' }, grid: { color: '#334155' } }, 
+                        x: { ticks: { color: '#e2e8f0' }, grid: { display: false } } 
+                    } 
+                }
+            });
+        }
+
+        function renderTable(results) {
+            const tableData = results.map(r => [
+                r.domain,
+                r.score,
+                r.ip || 'N/A',
+                Object.keys(r.open_ports || {}).join(', ') || 'None',
+                r.smtp_software || 'Unknown',
+                r.open_relay,
+                r.starttls,
+                (r.valid_users || []).length,
+                r.geo?.country || 'N/A'
+            ]);
+
+            if(tableInstance) tableInstance.destroy();
+            
+            tableInstance = $('#resultsTable').DataTable({
+                data: tableData,
+                columns: [
+                    { title: "Domain" },
+                    { title: "Score", render: function(data) {
+                        if(data >= 100) return `<span class="text-danger font-bold">${data}</span>`;
+                        if(data >= 30) return `<span class="text-warning font-bold">${data}</span>`;
+                        return `<span class="text-gray-400">${data}</span>`;
+                    }},
+                    { title: "IP" },
+                    { title: "Ports" },
+                    { title: "Software" },
+                    { title: "Relay", render: function(data) {
+                        return data ? '<span class="text-danger font-bold">★ YES</span>' : '<span class="text-gray-500">No</span>';
+                    }},
+                    { title: "STARTTLS", render: function(data) {
+                        return data ? '<span class="text-success">Yes</span>' : '<span class="text-gray-500">No</span>';
+                    }},
+                    { title: "Users" },
+                    { title: "Country" }
+                ],
+                pageLength: 25,
+                order: [[1, 'desc']], // Sort by score descending by default
+                language: { search: "Filter Domains:" }
+            });
+        }
+
+        // Initial Load
+        loadData();
+    </script>
+</body>
+</html>
