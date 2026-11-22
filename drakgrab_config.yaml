@@ -1,0 +1,34 @@
+cpanel_ports:
+- 2082
+- 2083
+- 2086
+- 2087
+max_threads: 50
+proxies: null
+rate_delay_max: 5
+rate_delay_min: 1
+retry_attempts: 3
+scan_timeout: 5
+smtp_ports:
+- 25
+- 465
+- 587
+- 2525
+verify_ssl: true
+vrfy_users:
+- root
+- admin
+- info
+- support
+- contact
+- postmaster
+- noreply
+- mail
+- sales
+- test
+- user
+- webmaster
+- abuse
+- hostmaster
+- admin@
+- administrator
